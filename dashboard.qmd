@@ -45,53 +45,6 @@ merida_center <- c(-89.6167, 20.9667)
 
 # Resumen
 
-## Indicadores
-
-### Total Propiedades {.value-box}
-
-```{r}
-#| echo: false
-total_props <- nrow(listings)
-con_imagenes <- sum(!is.na(image_urls$url[image_urls$image_rank == 1]))
-```
-
-`r format(total_props, big.mark = ",")`
-<br><small>`r format(con_imagenes, big.mark = ",")` con imágenes</small>
-
-### Precio Promedio por Estancia {.value-box}
-
-```{r}
-#| echo: false
-# Los precios ya están en pesos mexicanos
-avg_price <- mean(listings$precio_total, na.rm = TRUE)
-avg_price_label <- paste0("$", number(avg_price, accuracy = 1, big.mark = ","), " MXN")
-```
-
-`r avg_price_label`
-<br><small>Corresponde al precio total de la estancia promedio.</small>
-
-### Precio Promedio por Noche {.value-box}
-
-```{r}
-#| echo: false
-avg_night_price <- mean(listings$price_per_night, na.rm = TRUE)
-avg_night_price_label <- paste0("$", number(avg_night_price, accuracy = 1, big.mark = ","), " MXN")
-```
-
-`r avg_night_price_label`
-<br><small>Promedio calculado a partir del campo `price_per_night`.</small>
-
-### Calificación Promedio {.value-box}
-
-```{r}
-#| echo: false
-avg_rating <- mean(listings$calificacion[listings$calificacion > 0], na.rm = TRUE)
-total_rated <- sum(listings$calificacion > 0, na.rm = TRUE)
-```
-
-`r format(round(avg_rating, 2), nsmall = 2)` / 5.0
-<br><small>`r format(total_rated, big.mark = ",")` propiedades calificadas</small>
-
 ## Mapa General
 
 ```{r}
