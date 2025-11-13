@@ -14,9 +14,11 @@ Thumbs.db
 # Generated dashboards / reports
 *.html
 *.nb.html
+dashboard_files/
 
 # Data caches / temp
 outputs/*.tmp
 outputs/*.bak
+merida_airbnb_nov2025.geojson
 ## lib
 dashboard_files/
