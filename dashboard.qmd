@@ -45,7 +45,7 @@ merida_center <- c(-89.6167, 20.9667)
 
 # Resumen
 
-## Column {width=25%}
+## Indicadores
 
 ### Total Propiedades {.value-box}
 
@@ -79,9 +79,7 @@ total_rated <- sum(listings$calificacion > 0, na.rm = TRUE)
 `r format(round(avg_rating, 2), nsmall = 2)` / 5.0
 <br><small>`r format(total_rated, big.mark = ",")` propiedades calificadas</small>
 
-## Column {width=75%}
-
-### Mapa General
+## Mapa General
 
 ```{r}
 #| title: Distribución de Propiedades
@@ -782,4 +780,3 @@ ggplotly(
     theme(legend.position = "none")
 )
 ```
-
