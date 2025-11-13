@@ -66,6 +66,33 @@ pluck_num <- function(x, ..., default = NA_real_) {
   suppressWarnings(as.numeric(val))
 }
 
+parse_mxn_amount <- function(text) {
+  if (is.null(text) || length(text) == 0 || is.na(text) || identical(text, "")) {
+    return(NA_real_)
+  }
+  amount_text <- stringr::str_extract(text, "\\$[0-9\\.,]+")
+  if (is.na(amount_text) || length(amount_text) == 0) {
+    return(NA_real_)
+  }
+  normalized <- amount_text |>
+    str_remove_all("\\$") |>
+    str_replace_all("\\.", "") |>
+    str_replace(",", ".")
+  suppressWarnings(as.numeric(normalized))
+}
+
+extract_total_from_price <- function(price_obj) {
+  if (is.null(price_obj) || length(price_obj) == 0) {
+    return(NA_real_)
+  }
+  breakdown <- price_obj$break_down
+  if (is.null(breakdown) || length(breakdown) == 0) {
+    return(NA_real_)
+  }
+  description <- purrr::pluck(breakdown, 1, "description", .default = NA_character_)
+  parse_mxn_amount(description)
+}
+
 extract_structured_messages <- function(structured) {
   if (is.null(structured) || length(structured) == 0) {
     return(tibble())
@@ -169,6 +196,12 @@ listings <- listings |>
     rating_clean_count = parse_double(as.character(rating_clean$reviewCount))
   )
 
+price_lookup <- listings |>
+  transmute(
+    room_id,
+    quoted_total_mxn = map_dbl(price_parsed, extract_total_from_price)
+  )
+
 listings_core <- listings |>
   transmute(
     room_id,
@@ -182,8 +215,7 @@ listings_core <- listings |>
     check_in,
     check_out,
     stay_nights,
-    precio_total,
-    price_per_night = if_else(!is.na(precio_total) & stay_nights > 0, round(precio_total / stay_nights, 2), NA_real_),
+    precio_total_raw = precio_total,
     calificacion,
     num_reseñas,
     rating_value,
@@ -194,7 +226,21 @@ listings_core <- listings |>
     longitude,
     geometry_lat,
     geometry_lon
-  )
+  ) |>
+  left_join(price_lookup, by = "room_id") |>
+  mutate(
+    precio_total = coalesce(quoted_total_mxn, precio_total_raw),
+    price_per_night = if_else(
+      !is.na(precio_total) & stay_nights > 0,
+      round(precio_total / stay_nights, 2),
+      if_else(
+        !is.na(precio_total_raw) & stay_nights > 0,
+        round(precio_total_raw / stay_nights, 2),
+        NA_real_
+      )
+    )
+  ) |>
+  select(-precio_total_raw, -quoted_total_mxn)
 
 listings_sf <- st_as_sf(listings_core, coords = c("geometry_lon", "geometry_lat"), crs = 4326, remove = FALSE)
 base_coords <- st_drop_geometry(listings_sf) |>

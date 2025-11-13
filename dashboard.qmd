@@ -43,49 +43,56 @@ image_urls <- st_read("outputs/05_image_urls.geojson", quiet = TRUE)
 
 merida_center <- c(-89.6167, 20.9667)
 
-price_scale <- 1000
-price_columns <- c(
-  "precio_total",
-  "price_per_night",
-  "avg_price",
-  "avg_price_total",
-  "avg_price_per_window",
-  "avg_price_per_night",
-  "median_price",
-  "median_price_per_night",
-  "price_range_min",
-  "price_range_max",
-  "min_price",
-  "max_price"
-)
-
-scale_price_columns <- function(data, cols = price_columns, scale = price_scale) {
-  if (!inherits(data, "data.frame")) {
-    return(data)
+parse_mxn_amount <- function(text) {
+  if (is.null(text) || length(text) == 0 || is.na(text) || identical(text, "")) {
+    return(NA_real_)
   }
-  data |>
-    mutate(across(any_of(cols), ~ .x * scale))
+  amount_text <- stringr::str_extract(text, "\\$\\s*[0-9\\.,]+")
+  if (is.na(amount_text) || length(amount_text) == 0) {
+    return(NA_real_)
+  }
+  numeric_part <- stringr::str_remove_all(amount_text, "\\$")
+  numeric_part <- stringr::str_trim(numeric_part)
+  if (stringr::str_detect(numeric_part, ",")) {
+    numeric_part <- stringr::str_replace_all(numeric_part, "\\.", "")
+    numeric_part <- stringr::str_replace(numeric_part, ",", ".")
+  } else {
+    numeric_part <- stringr::str_replace_all(numeric_part, ",", "")
+  }
+  suppressWarnings(as.numeric(numeric_part))
 }
 
-objects_with_prices <- c(
-  "listings",
-  "price_breakdown",
-  "geographic_quadrants",
-  "property_locations",
-  "booking_windows",
-  "seasonal_pricing",
-  "stay_duration",
-  "rating_segments",
-  "review_analysis",
-  "superhost_analysis",
-  "property_types",
-  "property_capacity",
-  "competitive_analysis"
-)
+price_lookup <- price_breakdown |>
+  st_drop_geometry() |>
+  arrange(room_id, breakdown_order) |>
+  group_by(room_id) |>
+  summarise(
+    breakdown_amount = dplyr::first(breakdown_amount),
+    breakdown_description = dplyr::first(breakdown_description),
+    quoted_total_mxn = parse_mxn_amount(breakdown_description),
+    correction_factor = if_else(
+      !is.na(quoted_total_mxn) & !is.na(breakdown_amount) & breakdown_amount > 0,
+      quoted_total_mxn / breakdown_amount,
+      NA_real_
+    ),
+    .groups = "drop"
+  )
 
-for (obj_name in objects_with_prices) {
-  assign(obj_name, scale_price_columns(get(obj_name)))
-}
+listings <- listings |>
+  left_join(price_lookup |> select(room_id, quoted_total_mxn, correction_factor), by = "room_id") |>
+  mutate(
+    precio_total = case_when(
+      !is.na(quoted_total_mxn) ~ quoted_total_mxn,
+      !is.na(correction_factor) & !is.na(precio_total) ~ precio_total * correction_factor,
+      TRUE ~ precio_total
+    ),
+    price_per_night = if_else(
+      !is.na(precio_total) & stay_nights > 0,
+      round(precio_total / stay_nights, 2),
+      price_per_night
+    )
+  ) |>
+  select(-quoted_total_mxn, -correction_factor)
 
 coords_matrix <- st_coordinates(listings)
 valid_coords <- complete.cases(coords_matrix[, 1], coords_matrix[, 2])
