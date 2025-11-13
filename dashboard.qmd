@@ -1,0 +1,785 @@
+---
+title: "Airbnb Mérida - Nov 2025"
+author: "EcoData"
+format:
+  dashboard:
+    theme: cosmo
+    logo: https://upload.wikimedia.org/wikipedia/commons/6/69/Airbnb_Logo_B%C3%A9lo.svg
+    nav-buttons: [github]
+    orientation: columns
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+library(sf)
+library(dplyr)
+library(mapgl)
+library(ggplot2)
+library(plotly)
+library(tidyr)
+library(DT)
+library(scales)
+library(viridis)
+
+listings <- st_read("outputs/01_listings_core.geojson", quiet = TRUE)
+price_breakdown <- st_read("outputs/03_price_breakdown.geojson", quiet = TRUE)
+geographic_quadrants <- st_read("outputs/12_geographic_quadrants.geojson", quiet = TRUE)
+property_locations <- st_read("outputs/13_property_locations_enhanced.geojson", quiet = TRUE)
+booking_windows <- st_read("outputs/14_booking_windows.geojson", quiet = TRUE)
+seasonal_pricing <- st_read("outputs/15_seasonal_pricing.geojson", quiet = TRUE)
+stay_duration <- st_read("outputs/16_stay_duration_analysis.geojson", quiet = TRUE)
+rating_segments <- st_read("outputs/17_rating_segments.geojson", quiet = TRUE)
+review_analysis <- st_read("outputs/18_review_analysis.geojson", quiet = TRUE)
+superhost_analysis <- st_read("outputs/19_superhost_analysis.geojson", quiet = TRUE)
+property_types <- st_read("outputs/20_property_types.geojson", quiet = TRUE)
+property_capacity <- st_read("outputs/21_property_capacity.geojson", quiet = TRUE)
+competitive_analysis <- st_read("outputs/22_competitive_analysis.geojson", quiet = TRUE)
+property_badges <- st_read("outputs/07_property_badges.geojson", quiet = TRUE)
+payment_policies <- st_read("outputs/08_payment_policies.geojson", quiet = TRUE)
+image_urls <- st_read("outputs/05_image_urls.geojson", quiet = TRUE)
+
+merida_center <- c(-89.6167, 20.9667)
+```
+
+# Resumen
+
+## Column {width=25%}
+
+### Total Propiedades {.value-box}
+
+```{r}
+#| echo: false
+total_props <- nrow(listings)
+con_imagenes <- sum(!is.na(image_urls$url[image_urls$image_rank == 1]))
+```
+
+`r format(total_props, big.mark = ",")`
+<br><small>`r format(con_imagenes, big.mark = ",")` con imágenes</small>
+
+### Precio Promedio {.value-box}
+
+```{r}
+#| echo: false
+# Los precios ya están en pesos mexicanos
+avg_price <- mean(listings$precio_total, na.rm = TRUE)
+```
+
+`r paste0("$", format(round(avg_price, 2), big.mark = ","), " MXN")`
+
+### Calificación Promedio {.value-box}
+
+```{r}
+#| echo: false
+avg_rating <- mean(listings$calificacion[listings$calificacion > 0], na.rm = TRUE)
+total_rated <- sum(listings$calificacion > 0, na.rm = TRUE)
+```
+
+`r format(round(avg_rating, 2), nsmall = 2)` / 5.0
+<br><small>`r format(total_rated, big.mark = ",")` propiedades calificadas</small>
+
+## Column {width=75%}
+
+### Mapa General
+
+```{r}
+#| title: Distribución de Propiedades
+
+listings_map <- listings |>
+  st_drop_geometry() |>
+  mutate(
+    precio_cat = case_when(
+      precio_total < 500 ~ "Económico",
+      precio_total < 1500 ~ "Medio",
+      precio_total < 3000 ~ "Alto",
+      TRUE ~ "Exclusivo"
+    )
+  ) |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+listings_map_popup <- listings_map |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 250px; padding: 8px;'>",
+      "<h4 style='margin: 0 0 8px 0; color: #1f2937;'>", substr(name, 1, 40),
+      if_else(nchar(name) > 40, "...", ""), "</h4>",
+      "<p style='margin: 4px 0; font-size: 13px;'><strong>Precio:</strong> $", round(precio_total, 2), " MXN</p>",
+      "<p style='margin: 4px 0; font-size: 13px;'><strong>Por noche:</strong> $", round(price_per_night, 2), " MXN</p>",
+      "<p style='margin: 4px 0; font-size: 13px;'><strong>Calificación:</strong> ",
+      if_else(calificacion > 0, paste0(round(calificacion, 1), "/5.0 (", num_reseñas, " reseñas)"), "Sin calificar"), "</p>",
+      "<p style='margin: 4px 0; font-size: 13px;'><strong>Ubicación:</strong> ", cuadrante_busqueda, "</p>",
+      "</div>"
+    )
+  )
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+  center = merida_center,
+  zoom = 11
+) |>
+  add_circle_layer(
+    id = "points",
+    source = listings_map_popup,
+    circle_radius = list(
+      "interpolate", list("linear"), list("zoom"),
+      8, 4, 12, 7, 16, 14
+    ),
+    circle_color = list(
+      "match",
+      list("get", "precio_cat"),
+      "Económico", "#10b981",
+      "Medio", "#3b82f6",
+      "Alto", "#6366f1",
+      "Exclusivo", "#a855f7",
+      "#64748b"
+    ),
+    circle_opacity = 0.8,
+    circle_stroke_width = 2,
+    circle_stroke_color = "#ffffff",
+    popup = "popup_info"
+  ) |>
+  add_categorical_legend(
+    legend_title = "Categorías de Precio",
+    values = c("Económico", "Medio", "Alto", "Exclusivo"),
+    colors = c("#10b981", "#3b82f6", "#6366f1", "#a855f7"),
+    position = "bottom-right"
+  ) |>
+  add_navigation_control(position = "top-right") |>
+  add_fullscreen_control(position = "top-left")
+```
+
+# Propiedades
+
+## Column
+
+### Por Tipo
+
+```{r}
+tipo_stats <- property_types |>
+  st_drop_geometry() |>
+  mutate(
+    tipo = case_when(
+      grepl("Casa|Villa", title, ignore.case = TRUE) ~ "Casa/Villa",
+      grepl("Apartamento", title, ignore.case = TRUE) ~ "Apartamento",
+      grepl("Habitacion", title, ignore.case = TRUE) ~ "Habitación",
+      TRUE ~ "Otro"
+    )
+  ) |>
+  count(tipo)
+
+ggplotly(
+  ggplot(tipo_stats, aes(x = reorder(tipo, n), y = n, fill = tipo)) +
+    geom_col() +
+    coord_flip() +
+    theme_minimal() +
+    theme(legend.position = "none")
+)
+```
+
+## Column
+
+### Tabla de Propiedades con Imágenes
+
+```{r}
+#| title: Top 50 Propiedades
+
+tabla_imagenes <- listings |>
+  st_drop_geometry() |>
+  left_join(
+    image_urls |>
+      st_drop_geometry() |>
+      filter(image_rank == 1) |>
+      select(room_id, url),
+    by = "room_id"
+  ) |>
+  left_join(
+    property_capacity |> st_drop_geometry() |> select(room_id, num_bedrooms, num_beds),
+    by = "room_id"
+  ) |>
+  mutate(
+    Imagen = ifelse(
+      !is.na(url),
+      paste0('<img src="', url, '" height="70" style="border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">'),
+      '<div style="width:90px;height:70px;background:#e5e7eb;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#9ca3af;">Sin imagen</div>'
+    )
+  ) |>
+  select(
+    Imagen,
+    Nombre = name,
+    `Precio` = precio_total,
+    `$/Noche` = price_per_night,
+    `Rating` = calificacion,
+    `Reseñas` = num_reseñas,
+    `Dorm.` = num_bedrooms,
+    `Camas` = num_beds
+  ) |>
+  arrange(desc(Precio)) |>
+  head(50)
+
+datatable(
+  tabla_imagenes,
+  escape = FALSE,
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    columnDefs = list(
+      list(width = '100px', targets = 0),
+      list(className = 'dt-center', targets = c(2:6))
+    )
+  ),
+  rownames = FALSE,
+  class = 'cell-border stripe hover'
+) |>
+  formatCurrency(c('Precio', '$/Noche'), currency = "$", digits = 2, mark = ",") |>
+  formatRound('Rating', digits = 2)
+```
+
+# Precios
+
+## Row
+
+### Distribución
+
+```{r}
+ggplotly(
+  listings |>
+    st_drop_geometry() |>
+    filter(precio_total < 10000) |>
+    ggplot(aes(x = precio_total)) +
+    geom_histogram(bins = 50, fill = "#3b82f6") +
+    labs(x = "Precio Total (MXN)", y = "Cantidad", title = "Distribución de Precios") +
+    theme_minimal()
+)
+```
+
+### Por Temporada
+
+```{r}
+ggplotly(
+  seasonal_pricing |>
+    st_drop_geometry() |>
+    filter(precio_total < 10000) |>
+    ggplot(aes(x = season_type, y = precio_total)) +
+    geom_boxplot(fill = "#3b82f6") +
+    labs(x = "Temporada", y = "Precio Total (MXN)", title = "Precios por Temporada") +
+    theme_minimal()
+)
+```
+
+# Calidad
+
+## Row
+
+### Calificadas {.value-box}
+
+```{r}
+#| echo: false
+rated <- sum(listings$calificacion > 0, na.rm = TRUE)
+```
+
+`r format(rated, big.mark = ",")`
+
+### Superhosts {.value-box}
+
+```{r}
+#| echo: false
+total_superhosts <- superhost_analysis |>
+  st_drop_geometry() |>
+  filter(host_is_superhost == TRUE) |>
+  nrow()
+```
+
+`r format(total_superhosts, big.mark = ",")`
+
+### Segmentos
+
+```{r}
+ggplotly(
+  rating_segments |>
+    st_drop_geometry() |>
+    ggplot(aes(x = rating_range, y = total_properties)) +
+    geom_col(fill = "#10b981") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+```
+
+
+# Geografía
+
+## Column {width=40%}
+
+### Cuadrantes Top
+
+```{r}
+#| title: Top 15 Cuadrantes por Propiedades
+
+top_cuad <- geographic_quadrants |>
+  st_drop_geometry() |>
+  arrange(desc(total_properties)) |>
+  head(15) |>
+  mutate(cuad_short = stringr::str_trunc(cuadrante_busqueda, 20))
+
+ggplotly(
+  ggplot(top_cuad, aes(x = reorder(cuad_short, total_properties),
+                       y = total_properties, fill = avg_price)) +
+    geom_col() +
+    coord_flip() +
+    scale_fill_viridis_c(option = "plasma") +
+    labs(x = NULL, y = "Propiedades", fill = "Precio\nPromedio") +
+    theme_minimal()
+)
+```
+
+### Mapa de Calor
+
+```{r}
+#| title: Densidad de Propiedades
+
+heatmap_data <- listings |>
+  st_drop_geometry() |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+  center = merida_center,
+  zoom = 11
+) |>
+  add_source(id = "heat", data = heatmap_data) |>
+  add_layer(
+    id = "heatmap",
+    source = "heat",
+    type = "heatmap",
+    paint = list(
+      "heatmap-intensity" = list(
+        "interpolate", list("linear"), list("zoom"),
+        0, 1, 15, 2.5
+      ),
+      "heatmap-color" = list(
+        "interpolate", list("linear"), list("heatmap-density"),
+        0, "rgba(33,102,172,0)",
+        0.2, "rgb(103,169,207)",
+        0.4, "rgb(209,229,240)",
+        0.6, "rgb(253,219,199)",
+        0.8, "rgb(239,138,98)",
+        1, "rgb(178,24,43)"
+      ),
+      "heatmap-radius" = list(
+        "interpolate", list("linear"), list("zoom"),
+        0, 12, 12, 25, 16, 40
+      ),
+      "heatmap-opacity" = 0.85
+    )
+  ) |>
+  add_navigation_control(position = "top-right") |>
+  add_continuous_legend(
+    legend_title = "Densidad de Propiedades",
+    values = c(0, 50, 100),
+    colors = c("#6ba6cd", "#ef8a62", "#b2182b"),
+    position = "bottom-right"
+  )
+```
+
+## Column {width=60%}
+
+### Mapa por Zonas
+
+```{r}
+#| title: Clasificación por Distancia al Centro
+
+zones_map_popup <- property_locations |>
+  st_drop_geometry() |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 200px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #1f2937;'>Propiedad</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Zona:</strong> ", zone_classification, "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Distancia:</strong> ", round(distance_to_center_km, 1), " km</p>",
+      "</div>"
+    )
+  ) |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  center = merida_center,
+  zoom = 10.8
+) |>
+  add_circle_layer(
+    id = "zone-points",
+    source = zones_map_popup,
+    circle_radius = list(
+      "interpolate", list("linear"), list("zoom"),
+      8, 3, 12, 6, 16, 12
+    ),
+    circle_color = list(
+      "match",
+      list("get", "zone_classification"),
+      "Centro", "#10b981",
+      "Zona Media", "#3b82f6",
+      "Zona Periférica", "#f59e0b",
+      "Zona Remota", "#ef4444",
+      "#64748b"
+    ),
+    circle_opacity = 0.8,
+    circle_stroke_width = 2,
+    circle_stroke_color = "#ffffff",
+    popup = "popup_info"
+  ) |>
+  add_categorical_legend(
+    legend_title = "Clasificación por Distancia",
+    values = c("Centro", "Zona Media", "Zona Periférica", "Zona Remota"),
+    colors = c("#10b981", "#3b82f6", "#f59e0b", "#ef4444"),
+    position = "bottom-left"
+  )
+```
+
+# Mapas Especializados
+
+## Row
+
+### Mapa de Calor por Precios
+
+```{r}
+#| title: Concentración de Propiedades por Precio
+
+price_heatmap <- listings |>
+  st_drop_geometry() |>
+  filter(precio_total > 0) |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+  center = merida_center,
+  zoom = 11
+) |>
+  add_source(id = "price-heat", data = price_heatmap) |>
+  add_layer(
+    id = "price-heatmap",
+    source = "price-heat",
+    type = "heatmap",
+    paint = list(
+      "heatmap-weight" = list(
+        "interpolate", list("linear"), list("get", "precio_total"),
+        0, 0, 3000, 1
+      ),
+      "heatmap-intensity" = list(
+        "interpolate", list("linear"), list("zoom"),
+        0, 1, 15, 3
+      ),
+      "heatmap-color" = list(
+        "interpolate", list("linear"), list("heatmap-density"),
+        0, "rgba(16,185,129,0)",
+        0.2, "rgba(16,185,129,0.3)",
+        0.4, "rgba(59,130,246,0.5)",
+        0.6, "rgba(99,102,241,0.6)",
+        0.8, "rgba(168,85,247,0.7)",
+        1, "rgba(236,72,153,0.9)"
+      ),
+      "heatmap-radius" = list(
+        "interpolate", list("linear"), list("zoom"),
+        0, 15, 12, 25, 16, 35
+      ),
+      "heatmap-opacity" = 0.8
+    )
+  ) |>
+  add_navigation_control(position = "top-right") |>
+  add_continuous_legend(
+    legend_title = "Intensidad de Precios",
+    values = c(0, 1500, 3000),
+    colors = c("#16a34a", "#6366f1", "#ec4899"),
+    position = "bottom-left"
+  )
+```
+
+### Mapa por Capacidad
+
+```{r}
+#| title: Propiedades por Número de Dormitorios
+
+capacity_map_popup <- property_capacity |>
+  st_drop_geometry() |>
+  filter(!is.na(num_bedrooms), num_bedrooms <= 6) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 200px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #1f2937;'>Propiedad</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Dormitorios:</strong> ", num_bedrooms, "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Camas:</strong> ", num_beds, "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Eficiencia:</strong> ", round(capacity_efficiency_ratio, 2), "</p>",
+      "</div>"
+    )
+  ) |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  center = merida_center,
+  zoom = 11
+) |>
+  add_circle_layer(
+    id = "capacity-points",
+    source = capacity_map_popup,
+    circle_radius = list(
+      "interpolate", list("linear"), list("get", "num_bedrooms"),
+      1, 4, 6, 16
+    ),
+    circle_color = list(
+      "interpolate", list("linear"), list("get", "num_bedrooms"),
+      1, "#10b981",
+      2, "#3b82f6",
+      3, "#f59e0b",
+      4, "#ef4444",
+      6, "#8b5cf6"
+    ),
+    circle_opacity = 0.7,
+    circle_stroke_width = 1,
+    circle_stroke_color = "#ffffff",
+    popup = "popup_info"
+  ) |>
+  add_continuous_legend(
+    legend_title = "Número de Dormitorios",
+    values = c(1, 2, 3, 4, 5, 6),
+    colors = c("#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#8b5cf6"),
+    position = "bottom-right"
+  )
+```
+
+## Row
+
+### Superhosts vs Anfitriones Regulares
+
+```{r}
+#| title: Distribución de Superhosts
+
+superhost_map_popup <- superhost_analysis |>
+  st_drop_geometry() |>
+  filter(!is.na(host_is_superhost)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #1f2937;'>", substr(host_name, 1, 30),
+      if_else(nchar(host_name) > 30, "...", ""), "</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Tipo:</strong> ",
+      if_else(host_is_superhost, "Superhost", "Anfitrión Regular"), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Rating:</strong> ",
+      round(host_rating_average, 1), "/5.0</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Años hosting:</strong> ", host_years_hosting, "</p>",
+      "</div>"
+    )
+  ) |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+  center = merida_center,
+  zoom = 11
+) |>
+  add_circle_layer(
+    id = "superhost-points",
+    source = superhost_map_popup,
+    circle_radius = list(
+      "interpolate", list("linear"), list("zoom"),
+      8, 4, 12, 7, 16, 12
+    ),
+    circle_color = list(
+      "case",
+      list("==", list("get", "host_is_superhost"), TRUE), "#f59e0b",
+      "#64748b"
+    ),
+    circle_opacity = 0.8,
+    circle_stroke_width = 2,
+    circle_stroke_color = "#ffffff",
+    popup = "popup_info"
+  ) |>
+  add_categorical_legend(
+    legend_title = "Estado del Anfitrión",
+    values = c("Superhost", "Anfitrión Regular"),
+    colors = c("#f59e0b", "#64748b"),
+    position = "top-left"
+  )
+```
+
+### Análisis de Reseñas
+
+```{r}
+#| title: Propiedades por Cantidad de Reseñas
+
+reviews_map_popup <- listings |>
+  st_drop_geometry() |>
+  filter(num_reseñas > 0) |>
+  mutate(
+    categoria_reseñas = case_when(
+      num_reseñas < 5 ~ "Pocas (1-4)",
+      num_reseñas < 20 ~ "Moderadas (5-19)",
+      num_reseñas < 50 ~ "Muchas (20-49)",
+      TRUE ~ "Abundantes (50+)"
+    ),
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 200px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #1f2937;'>", substr(name, 1, 30),
+      if_else(nchar(name) > 30, "...", ""), "</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Reseñas:</strong> ", num_reseñas, "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Calificación:</strong> ",
+      if_else(calificacion > 0, paste0(round(calificacion, 1), "/5.0"), "Sin calificar"), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Precio:</strong> $", round(precio_total, 2), " MXN</p>",
+      "</div>"
+    )
+  ) |>
+  st_as_sf(coords = c("geometry_lon", "geometry_lat"), crs = 4326)
+
+maplibre(
+  style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+  center = merida_center,
+  zoom = 11
+) |>
+  add_circle_layer(
+    id = "review-points",
+    source = reviews_map_popup,
+    circle_radius = list(
+      "interpolate", list("linear"), list("get", "num_reseñas"),
+      0, 3, 100, 12
+    ),
+    circle_color = list(
+      "match",
+      list("get", "categoria_reseñas"),
+      "Pocas (1-4)", "#fbbf24",
+      "Moderadas (5-19)", "#3b82f6",
+      "Muchas (20-49)", "#10b981",
+      "Abundantes (50+)", "#8b5cf6",
+      "#64748b"
+    ),
+    circle_opacity = 0.7,
+    circle_stroke_width = 1,
+    circle_stroke_color = "#ffffff",
+    popup = "popup_info"
+  ) |>
+  add_categorical_legend(
+    legend_title = "Volumen de Reseñas",
+    values = c("Pocas (1-4)", "Moderadas (5-19)", "Muchas (20-49)", "Abundantes (50+)"),
+    colors = c("#fbbf24", "#3b82f6", "#10b981", "#8b5cf6"),
+    position = "top-right"
+  )
+```
+
+# Competitividad
+
+## Row
+
+### Matriz Precio-Calidad
+
+```{r}
+#| title: Análisis Competitivo
+
+comp_data <- competitive_analysis |>
+  st_drop_geometry() |>
+  filter(!is.na(value_for_money_score), competitive_position != "Sin datos")
+
+ggplotly(
+  ggplot(comp_data, aes(
+    x = price_percentile * 100,
+    y = rating_percentile * 100,
+    color = competitive_position,
+    size = precio_total
+  )) +
+    geom_point(alpha = 0.6) +
+    geom_hline(yintercept = 50, linetype = "dashed", color = "gray") +
+    geom_vline(xintercept = 50, linetype = "dashed", color = "gray") +
+    scale_color_manual(
+      values = c(
+        "Alto valor" = "#10b981",
+        "Valor medio" = "#3b82f6",
+        "Valor bajo" = "#ef4444"
+      )
+    ) +
+    labs(
+      x = "Percentil de Precio (%)",
+      y = "Percentil de Calificación (%)",
+      color = "Posición",
+      size = "Precio"
+    ) +
+    theme_minimal()
+)
+```
+
+### Distribución Competitiva
+
+```{r}
+#| title: Segmentos de Valor
+
+pos_dist <- competitive_analysis |>
+  st_drop_geometry() |>
+  filter(competitive_position != "Sin datos") |>
+  count(competitive_position) |>
+  mutate(
+    pct = round(n / sum(n) * 100, 1),
+    competitive_position = factor(
+      competitive_position,
+      levels = c("Alto valor", "Valor medio", "Valor bajo")
+    )
+  )
+
+ggplotly(
+  ggplot(pos_dist, aes(x = competitive_position, y = n, fill = competitive_position)) +
+    geom_col(width = 0.6) +
+    geom_text(aes(label = paste0(format(n, big.mark = ","), "\n(", pct, "%)")),
+              vjust = -0.5, size = 3.5) +
+    scale_fill_manual(
+      values = c(
+        "Alto valor" = "#10b981",
+        "Valor medio" = "#3b82f6",
+        "Valor bajo" = "#ef4444"
+      )
+    ) +
+    labs(x = NULL, y = "Cantidad") +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    ylim(0, max(pos_dist$n) * 1.15)
+)
+```
+
+# Análisis Temporal
+
+## Row
+
+### Ventanas de Reserva
+
+```{r}
+#| title: Análisis por Período
+
+booking_data <- booking_windows |>
+  st_drop_geometry() |>
+  mutate(periodo = paste(format(check_in, "%d/%m"), "-", format(check_out, "%d/%m")))
+
+ggplotly(
+  ggplot(booking_data, aes(x = periodo, y = avg_price_per_window)) +
+    geom_col(fill = "#3b82f6", width = 0.7) +
+    geom_line(aes(y = median_price, group = 1), color = "#ef4444", linewidth = 1.2) +
+    geom_point(aes(y = median_price), color = "#ef4444", size = 3) +
+    labs(x = "Período", y = "Precio (USD)", title = "Análisis por Ventanas de Reserva") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+```
+
+### Duración vs Precio
+
+```{r}
+#| title: Eficiencia por Duración de Estadía
+
+duration_data <- stay_duration |>
+  st_drop_geometry() |>
+  filter(stay_nights <= 7) |>
+  mutate(stay_nights = as.factor(stay_nights))
+
+ggplotly(
+  ggplot(duration_data, aes(x = stay_nights, y = avg_price_per_night, fill = stay_nights)) +
+    geom_col() +
+    scale_fill_viridis_d(option = "turbo") +
+    labs(x = "Duración (noches)", y = "Precio/Noche Promedio (USD)", title = "Precio por Duración de Estadía") +
+    theme_minimal() +
+    theme(legend.position = "none")
+)
+```
+

@@ -1,0 +1,12 @@
+{
+"type": "FeatureCollection",
+"name": "17_rating_segments",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "rating_range": "Bueno (4.0-4.4)", "total_properties": 274, "avg_price": 12.208029197080295, "avg_reviews_count": 20.255474452554743, "median_price": 3.0, "avg_price_per_night": 4.0682481751824815, "center_lon": -89.632996818556109, "center_lat": 20.998808983537742 }, "geometry": { "type": "Point", "coordinates": [ -89.632996818556109, 20.998808983537742 ] } },
+{ "type": "Feature", "properties": { "rating_range": "Excelente (4.8-5.0)", "total_properties": 2117, "avg_price": 10.338686820973034, "avg_reviews_count": 52.247520075578649, "median_price": 3.0, "avg_price_per_night": 3.446150212564945, "center_lon": -89.629715057702114, "center_lat": 21.009459647821611 }, "geometry": { "type": "Point", "coordinates": [ -89.629715057702114, 21.009459647821611 ] } },
+{ "type": "Feature", "properties": { "rating_range": "Muy Bueno (4.5-4.7)", "total_properties": 1213, "avg_price": 7.9365210222588729, "avg_reviews_count": 71.352844187963726, "median_price": 2.0, "avg_price_per_night": 2.6453833470733703, "center_lon": -89.63953445094208, "center_lat": 21.002664532318121 }, "geometry": { "type": "Point", "coordinates": [ -89.63953445094208, 21.002664532318121 ] } },
+{ "type": "Feature", "properties": { "rating_range": "Regular (<4.0)", "total_properties": 38, "avg_price": 4.1578947368421053, "avg_reviews_count": 4.8947368421052628, "median_price": 3.0, "avg_price_per_night": 1.3860526315789472, "center_lon": -89.667718686718416, "center_lat": 21.03474834415255 }, "geometry": { "type": "Point", "coordinates": [ -89.667718686718416, 21.03474834415255 ] } },
+{ "type": "Feature", "properties": { "rating_range": "Sin calificación", "total_properties": 1679, "avg_price": 13.898153662894559, "avg_reviews_count": 0.0, "median_price": 3.0, "avg_price_per_night": 4.6327218582489573, "center_lon": -89.64117401473645, "center_lat": 20.991591331873806 }, "geometry": { "type": "Point", "coordinates": [ -89.64117401473645, 20.991591331873806 ] } }
+]
+}
