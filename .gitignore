@@ -17,8 +17,7 @@ Thumbs.db
 dashboard_files/
 
 # Data caches / temp
+data_raw/
 outputs/*.tmp
 outputs/*.bak
 merida_airbnb_nov2025.geojson
-## lib
-dashboard_files/

@@ -13,7 +13,7 @@ suppressPackageStartupMessages({
   library(sf)
 })
 
-geojson_path <- "merida_airbnb_nov2025.geojson"
+geojson_path <- "data_raw/merida_airbnb_nov2025.geojson"
 stopifnot(file.exists(geojson_path))
 
 sanitize_pythonish_json <- function(text) {
