@@ -20,6 +20,7 @@ library(ggplot2)
 library(plotly)
 library(tidyr)
 library(DT)
+library(tibble)
 library(scales)
 library(viridis)
 
@@ -41,6 +42,110 @@ payment_policies <- st_read("outputs/08_payment_policies.geojson", quiet = TRUE)
 image_urls <- st_read("outputs/05_image_urls.geojson", quiet = TRUE)
 
 merida_center <- c(-89.6167, 20.9667)
+
+price_scale <- 1000
+price_columns <- c(
+  "precio_total",
+  "price_per_night",
+  "avg_price",
+  "avg_price_total",
+  "avg_price_per_window",
+  "avg_price_per_night",
+  "median_price",
+  "median_price_per_night",
+  "price_range_min",
+  "price_range_max",
+  "min_price",
+  "max_price"
+)
+
+scale_price_columns <- function(data, cols = price_columns, scale = price_scale) {
+  if (!inherits(data, "data.frame")) {
+    return(data)
+  }
+  data |>
+    mutate(across(any_of(cols), ~ .x * scale))
+}
+
+objects_with_prices <- c(
+  "listings",
+  "price_breakdown",
+  "geographic_quadrants",
+  "property_locations",
+  "booking_windows",
+  "seasonal_pricing",
+  "stay_duration",
+  "rating_segments",
+  "review_analysis",
+  "superhost_analysis",
+  "property_types",
+  "property_capacity",
+  "competitive_analysis"
+)
+
+for (obj_name in objects_with_prices) {
+  assign(obj_name, scale_price_columns(get(obj_name)))
+}
+
+coords_matrix <- st_coordinates(listings)
+valid_coords <- complete.cases(coords_matrix[, 1], coords_matrix[, 2])
+min_points_for_clusters <- 10
+
+if (sum(valid_coords) >= min_points_for_clusters) {
+  set.seed(123)
+  cluster_centers_n <- min(6, sum(valid_coords))
+  km_result <- kmeans(
+    coords_matrix[valid_coords, , drop = FALSE],
+    centers = cluster_centers_n,
+    nstart = 25
+  )
+  cluster_assignments <- rep(NA_integer_, nrow(listings))
+  cluster_assignments[valid_coords] <- km_result$cluster
+
+  clusters_sf <- listings |>
+    mutate(cluster_id = cluster_assignments) |>
+    filter(!is.na(cluster_id))
+
+  cluster_summary <- clusters_sf |>
+    st_drop_geometry() |>
+    group_by(cluster_id) |>
+    summarise(
+      total_properties = n(),
+      avg_price = mean(precio_total, na.rm = TRUE),
+      median_price = median(precio_total, na.rm = TRUE),
+      avg_rating = mean(if_else(calificacion > 0, calificacion, NA_real_), na.rm = TRUE),
+      avg_price_per_night = mean(price_per_night, na.rm = TRUE),
+      center_lon = mean(geometry_lon, na.rm = TRUE),
+      center_lat = mean(geometry_lat, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    arrange(desc(total_properties))
+
+  cluster_summary_sf <- st_as_sf(
+    cluster_summary,
+    coords = c("center_lon", "center_lat"),
+    crs = 4326,
+    remove = FALSE
+  )
+} else {
+  clusters_sf <- listings[0, ] |> mutate(cluster_id = integer())
+  cluster_summary <- tibble::tibble(
+    cluster_id = integer(),
+    total_properties = integer(),
+    avg_price = double(),
+    median_price = double(),
+    avg_rating = double(),
+    avg_price_per_night = double(),
+    center_lon = double(),
+    center_lat = double()
+  )
+  cluster_summary_sf <- st_as_sf(
+    cluster_summary,
+    coords = c("center_lon", "center_lat"),
+    crs = 4326,
+    remove = FALSE
+  )
+}
 ```
 
 # Resumen
@@ -397,6 +502,120 @@ maplibre(
     colors = c("#10b981", "#3b82f6", "#f59e0b", "#ef4444"),
     position = "bottom-left"
   )
+```
+
+# Clusters
+
+## Mapa de Clusters
+
+```{r}
+#| title: Zonas de mayor presencia
+
+if (nrow(clusters_sf) == 0) {
+  "No hay datos suficientes para generar clusters."
+} else {
+  cluster_points <- clusters_sf |>
+    mutate(
+      cluster_label = paste0("Cluster ", cluster_id),
+      popup_info = paste0(
+        "<div style='font-family: Arial; max-width: 240px; padding: 6px;'>",
+        "<h4 style='margin: 0 0 6px 0; color: #1f2937;'>", substr(name, 1, 32),
+        if_else(nchar(name) > 32, "...", ""), "</h4>",
+        "<p style='margin: 3px 0; font-size: 12px;'><strong>Cluster:</strong> ", cluster_label, "</p>",
+        "<p style='margin: 3px 0; font-size: 12px;'><strong>Precio:</strong> $", round(precio_total, 0), " MXN</p>",
+        "<p style='margin: 3px 0; font-size: 12px;'><strong>Por noche:</strong> $", round(price_per_night, 0), " MXN</p>",
+        "</div>"
+      )
+    )
+  cluster_centers <- cluster_summary_sf |>
+    mutate(
+      cluster_label = paste0("Cluster ", cluster_id),
+      popup_info = paste0(
+        "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+        "<h4 style='margin: 0 0 6px 0; color: #111827;'>", cluster_label, "</h4>",
+        "<p style='margin: 3px 0; font-size: 12px;'><strong>Propiedades:</strong> ",
+        format(total_properties, big.mark = ","), "</p>",
+        "<p style='margin: 3px 0; font-size: 12px;'><strong>Precio promedio:</strong> $",
+        round(avg_price, 0), " MXN</p>",
+        "<p style='margin: 3px 0; font-size: 12px;'><strong>Rating promedio:</strong> ",
+        if_else(is.na(avg_rating), "s/d", paste0(round(avg_rating, 2), "/5.0")), "</p>",
+        "</div>"
+      )
+    )
+  cluster_colors <- setNames(viridis(length(unique(cluster_points$cluster_label))), sort(unique(cluster_points$cluster_label)))
+  color_pairs <- as.list(unlist(mapply(c, names(cluster_colors), unname(cluster_colors))))
+  color_match_expr <- c(
+    list("match", list("get", "cluster_label")),
+    color_pairs,
+    list("#475569")
+  )
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    center = merida_center,
+    zoom = 11
+  ) |>
+    add_circle_layer(
+      id = "cluster-points",
+      source = cluster_points,
+      circle_radius = list(
+        "interpolate", list("linear"), list("zoom"),
+        9, 2.5, 12, 5, 15, 9
+      ),
+      circle_color = color_match_expr,
+      circle_opacity = 0.65,
+      circle_stroke_width = 1,
+      circle_stroke_color = "#ffffff",
+      popup = "popup_info"
+    ) |>
+    add_circle_layer(
+      id = "cluster-centers",
+      source = cluster_centers,
+      circle_radius = list(
+        "interpolate", list("linear"), list("get", "total_properties"),
+        10, 6, 250, 16
+      ),
+      circle_color = "#111827",
+      circle_opacity = 0.7,
+      circle_stroke_width = 3,
+      circle_stroke_color = "#facc15",
+      popup = "popup_info"
+    ) |>
+    add_categorical_legend(
+      legend_title = "Clusters detectados",
+      values = names(cluster_colors),
+      colors = unname(cluster_colors),
+      position = "bottom-right"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+## Top Clusters
+
+```{r}
+if (nrow(cluster_summary) == 0) {
+  "Sin datos suficientes para resumir clusters."
+} else {
+  cluster_summary |> 
+    mutate(
+      cluster_label = paste0("Cluster ", cluster_id)
+    ) |>
+    select(
+      Cluster = cluster_label,
+      `Propiedades` = total_properties,
+      `Precio Promedio` = avg_price,
+      `$/Noche Prom.` = avg_price_per_night,
+      `Rating Prom.` = avg_rating,
+      `Mediana Precio` = median_price
+    ) |>
+    datatable(
+      options = list(pageLength = 6, dom = "tip"),
+      rownames = FALSE,
+      class = 'cell-border stripe hover'
+    ) |>
+    formatCurrency(c("Precio Promedio", "$/Noche Prom.", "Mediana Precio"), currency = "$", digits = 0, mark = ",") |>
+    formatRound("Rating Prom.", digits = 2)
+}
 ```
 
 # Mapas Especializados
