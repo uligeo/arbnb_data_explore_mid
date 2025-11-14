@@ -18,6 +18,7 @@ dashboard_files/
 
 # Data caches / temp
 data_raw/
+data_raw/hex_enriquecido.gpkg
 outputs/*.tmp
 outputs/*.bak
 merida_airbnb_nov2025.geojson

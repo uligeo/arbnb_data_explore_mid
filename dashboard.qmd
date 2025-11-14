@@ -5,7 +5,6 @@ format:
   dashboard:
     theme: cosmo
     logo: https://upload.wikimedia.org/wikipedia/commons/6/69/Airbnb_Logo_B%C3%A9lo.svg
-    nav-buttons: [github]
     orientation: columns
 ---
 
@@ -40,6 +39,10 @@ competitive_analysis <- st_read("outputs/22_competitive_analysis.geojson", quiet
 property_badges <- st_read("outputs/07_property_badges.geojson", quiet = TRUE)
 payment_policies <- st_read("outputs/08_payment_policies.geojson", quiet = TRUE)
 image_urls <- st_read("outputs/05_image_urls.geojson", quiet = TRUE)
+# Hex data se generan corriendo `Rscript prepare_hex_layers.R`
+hex_demographics <- st_read("outputs/23_hex_demographics.geojson", quiet = TRUE)
+hex_environment <- st_read("outputs/24_hex_environment.geojson", quiet = TRUE)
+hex_mobility <- st_read("outputs/25_hex_mobility.geojson", quiet = TRUE)
 
 merida_center <- c(-89.6167, 20.9667)
 
@@ -509,6 +512,477 @@ maplibre(
     colors = c("#10b981", "#3b82f6", "#f59e0b", "#ef4444"),
     position = "bottom-left"
   )
+```
+
+# NSE y Densidad
+
+### NSE por Hexágono
+
+```{r}
+hex_soc_popup <- hex_demographics |>
+  filter(!is.na(nse_percentil)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Contexto socioeconómico</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Percentil NSE:</strong> ",
+      round(nse_percentil, 1), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Score:</strong> ",
+      round(nse_score, 2), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Modal:</strong> ",
+      nse_categoria_modal, "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Densidad poblacional:</strong> ",
+      if_else(is.finite(pop_density_km2), paste0(round(pop_density_km2, 1), " hab/km²"), "Sin datos"),
+      "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_soc_popup) == 0) {
+  "No hay datos para mostrar."
+} else {
+  nse_breaks <- quantile(hex_soc_popup$nse_percentil, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  nse_colors <- c("#172554", "#1d4ed8", "#2563eb", "#fbbf24", "#fb7185")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-nse",
+      source = hex_soc_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "nse_percentil"),
+        nse_breaks[[1]], nse_colors[1],
+        nse_breaks[[2]], nse_colors[2],
+        nse_breaks[[3]], nse_colors[3],
+        nse_breaks[[4]], nse_colors[4],
+        nse_breaks[[5]], nse_colors[5]
+      ),
+      fill_opacity = 0.78,
+      fill_outline_color = "#f1f5f9",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "Percentil NSE",
+      values = round(as.numeric(nse_breaks), 1),
+      colors = nse_colors,
+      position = "bottom-right"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+### Densidad Poblacional
+
+```{r}
+hex_density_popup <- hex_demographics |>
+  filter(!is.na(pop_density_km2), pop_density_km2 > 0) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Densidad poblacional</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Habitantes/km²:</strong> ",
+      round(pop_density_km2, 1), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Hogares/km²:</strong> ",
+      if_else(!is.na(households_density), as.character(round(households_density, 1)), "Sin datos"), "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_density_popup) == 0) {
+  "Sin datos de densidad."
+} else {
+  density_breaks <- quantile(hex_density_popup$pop_density_km2, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  density_colors <- c("#fef2f2", "#fecaca", "#f87171", "#dc2626", "#7f1d1d")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-density",
+      source = hex_density_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "pop_density_km2"),
+        density_breaks[[1]], density_colors[1],
+        density_breaks[[2]], density_colors[2],
+        density_breaks[[3]], density_colors[3],
+        density_breaks[[4]], density_colors[4],
+        density_breaks[[5]], density_colors[5]
+      ),
+      fill_opacity = 0.78,
+      fill_outline_color = "#fee2e2",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "Habitantes por km²",
+      values = round(as.numeric(density_breaks), 0),
+      colors = density_colors,
+      position = "bottom-left"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+# Capital Humano
+
+### Educación y Capital Humano
+
+```{r}
+hex_education_popup <- hex_demographics |>
+  filter(!is.na(escolaridad_promedio)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Educación</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Escolaridad promedio:</strong> ",
+      round(escolaridad_promedio, 1), " años</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>% Educación superior:</strong> ",
+      round(pct_educacion_superior, 1), "%</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>% Sin escolaridad:</strong> ",
+      round(pct_sin_escolaridad, 1), "%</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_education_popup) == 0) {
+  "No hay datos de educación."
+} else {
+  edu_breaks <- quantile(hex_education_popup$pct_educacion_superior, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  edu_colors <- c("#f7fee7", "#bef264", "#84cc16", "#4d7c0f", "#365314")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-education",
+      source = hex_education_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "pct_educacion_superior"),
+        edu_breaks[[1]], edu_colors[1],
+        edu_breaks[[2]], edu_colors[2],
+        edu_breaks[[3]], edu_colors[3],
+        edu_breaks[[4]], edu_colors[4],
+        edu_breaks[[5]], edu_colors[5]
+      ),
+      fill_opacity = 0.8,
+      fill_outline_color = "#d9f99d",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "% con educación superior",
+      values = round(as.numeric(edu_breaks), 1),
+      colors = edu_colors,
+      position = "bottom-right"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+### Cobertura Seguridad Social
+
+```{r}
+hex_social_popup <- hex_demographics |>
+  filter(!is.na(pct_seguridad_social)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Seguridad social</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Afiliación:</strong> ",
+      round(pct_seguridad_social, 1), "%</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>NSE modal:</strong> ",
+      coalesce(nse_categoria_modal, "s/d"), "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_social_popup) == 0) {
+  "Sin datos de seguridad social."
+} else {
+  soc_breaks <- quantile(hex_social_popup$pct_seguridad_social, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  soc_colors <- c("#fff7ed", "#fdba74", "#fb923c", "#ea580c", "#9a3412")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-socsec",
+      source = hex_social_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "pct_seguridad_social"),
+        soc_breaks[[1]], soc_colors[1],
+        soc_breaks[[2]], soc_colors[2],
+        soc_breaks[[3]], soc_colors[3],
+        soc_breaks[[4]], soc_colors[4],
+        soc_breaks[[5]], soc_colors[5]
+      ),
+      fill_opacity = 0.78,
+      fill_outline_color = "#fed7aa",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "% con seguridad social",
+      values = round(as.numeric(soc_breaks), 1),
+      colors = soc_colors,
+      position = "bottom-left"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+# Medio Ambiente
+
+### Cobertura Verde
+
+```{r}
+hex_env_popup <- hex_environment |>
+  filter(!is.na(ndvi_lluvias_mean)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Índice de vegetación</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>NDVI Lluvias:</strong> ",
+      round(ndvi_lluvias_mean, 3), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>NDVI Secas:</strong> ",
+      round(ndvi_secas_mean, 3), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Promedio veg:</strong> ",
+      round(promedio_veg, 3), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Rango estacional:</strong> ",
+      round(ndvi_amplitude, 3), "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_env_popup) == 0) {
+  "Sin datos de NDVI."
+} else {
+  ndvi_breaks <- quantile(hex_env_popup$ndvi_lluvias_mean, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  ndvi_colors <- c("#fef9c3", "#bef264", "#4ade80", "#16a34a", "#166534")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-ndvi",
+      source = hex_env_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "ndvi_lluvias_mean"),
+        ndvi_breaks[[1]], ndvi_colors[1],
+        ndvi_breaks[[2]], ndvi_colors[2],
+        ndvi_breaks[[3]], ndvi_colors[3],
+        ndvi_breaks[[4]], ndvi_colors[4],
+        ndvi_breaks[[5]], ndvi_colors[5]
+      ),
+      fill_opacity = 0.75,
+      fill_outline_color = "#ecfccb",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "NDVI (Temporada de lluvias)",
+      values = round(as.numeric(ndvi_breaks), 3),
+      colors = ndvi_colors,
+      position = "bottom-left"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+### Temperatura Promedio
+
+```{r}
+hex_temp_popup <- hex_environment |>
+  filter(!is.na(prom_temp)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Temperatura promedio</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Promedio anual:</strong> ",
+      round(prom_temp, 1), "°C</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>NDVI lluvias:</strong> ",
+      round(ndvi_lluvias_mean, 3), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>NDVI secas:</strong> ",
+      round(ndvi_secas_mean, 3), "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_temp_popup) == 0) {
+  "Sin datos térmicos."
+} else {
+  temp_breaks <- quantile(hex_temp_popup$prom_temp, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  temp_colors <- c("#dcfce7", "#a7f3d0", "#fde68a", "#fb923c", "#b91c1c")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-temp",
+      source = hex_temp_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "prom_temp"),
+        temp_breaks[[1]], temp_colors[1],
+        temp_breaks[[2]], temp_colors[2],
+        temp_breaks[[3]], temp_colors[3],
+        temp_breaks[[4]], temp_colors[4],
+        temp_breaks[[5]], temp_colors[5]
+      ),
+      fill_opacity = 0.75,
+      fill_outline_color = "#fef08a",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "Temperatura °C",
+      values = round(as.numeric(temp_breaks), 1),
+      colors = temp_colors,
+      position = "bottom-right"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+# Movilidad
+
+### Cobertura de Transporte Público
+
+```{r}
+hex_mobility_popup <- hex_mobility |>
+  filter(!is.na(num_paradas) | !is.na(num_rutas)) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Transporte público</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Paradas:</strong> ",
+      coalesce(as.character(num_paradas), "Sin datos"), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Rutas:</strong> ",
+      coalesce(as.character(num_rutas), "Sin datos"), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Rutas/Parada:</strong> ",
+      if_else(!is.na(routes_per_stop), as.character(round(routes_per_stop, 2)), "Sin datos"), "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_mobility_popup) == 0) {
+  "No hay datos de movilidad."
+} else {
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-transit",
+      source = hex_mobility_popup,
+      fill_color = list(
+        "match",
+        list("get", "transit_category"),
+        "Alta", "#16a34a",
+        "Media", "#fde047",
+        "Baja", "#f97316",
+        "Sin datos", "#94a3b8",
+        "#94a3b8"
+      ),
+      fill_opacity = 0.72,
+      fill_outline_color = "#0f172a",
+      popup = "popup_info"
+    ) |>
+    add_categorical_legend(
+      legend_title = "Cobertura de rutas",
+      values = c("Alta", "Media", "Baja", "Sin datos"),
+      colors = c("#16a34a", "#fde047", "#f97316", "#94a3b8"),
+      position = "bottom-right"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+### Rutas por Parada
+
+```{r}
+hex_routes_popup <- hex_mobility |>
+  filter(!is.na(routes_per_stop), routes_per_stop > 0) |>
+  mutate(
+    popup_info = paste0(
+      "<div style='font-family: Arial; max-width: 220px; padding: 6px;'>",
+      "<h4 style='margin: 0 0 6px 0; color: #111827;'>Intensidad de rutas</h4>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Rutas/Parada:</strong> ",
+      round(routes_per_stop, 2), "</p>",
+      "<p style='margin: 3px 0; font-size: 12px;'><strong>Rutas totales:</strong> ",
+      coalesce(as.character(num_rutas), "Sin datos"), "</p>",
+      "</div>"
+    )
+  )
+
+if (nrow(hex_routes_popup) == 0) {
+  "Sin datos de intensidad."
+} else {
+  routes_breaks <- quantile(hex_routes_popup$routes_per_stop, probs = c(0.1, 0.3, 0.5, 0.7, 0.9), na.rm = TRUE)
+  routes_colors <- c("#e0f2fe", "#7dd3fc", "#38bdf8", "#0ea5e9", "#0c4a6e")
+  maplibre(
+    style = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+    center = merida_center,
+    zoom = 10.6
+  ) |>
+    add_fill_layer(
+      id = "hex-routes",
+      source = hex_routes_popup,
+      fill_color = list(
+        "interpolate", list("linear"), list("get", "routes_per_stop"),
+        routes_breaks[[1]], routes_colors[1],
+        routes_breaks[[2]], routes_colors[2],
+        routes_breaks[[3]], routes_colors[3],
+        routes_breaks[[4]], routes_colors[4],
+        routes_breaks[[5]], routes_colors[5]
+      ),
+      fill_opacity = 0.76,
+      fill_outline_color = "#bae6fd",
+      popup = "popup_info"
+    ) |>
+    add_continuous_legend(
+      legend_title = "Rutas por parada",
+      values = round(as.numeric(routes_breaks), 2),
+      colors = routes_colors,
+      position = "bottom-left"
+    ) |>
+    add_navigation_control(position = "top-right")
+}
+```
+
+## Ranking de Hexágonos
+
+### Top Hexágonos por Rutas
+
+```{r}
+mobility_table <- hex_mobility |>
+  st_drop_geometry() |>
+  filter(!is.na(num_paradas), num_paradas > 0) |>
+  mutate(
+    routes_per_stop = round(routes_per_stop, 2)
+  ) |>
+  arrange(desc(num_paradas), desc(num_rutas)) |>
+  select(
+    Hex = H3HASH,
+    `Paradas` = num_paradas,
+    `Rutas` = num_rutas,
+    `Rutas/Parada` = routes_per_stop,
+    `Categoría` = transit_category
+  ) |>
+  head(15)
+
+if (nrow(mobility_table) == 0) {
+  "No hay hexágonos con datos de rutas."
+} else {
+  datatable(
+    mobility_table,
+    options = list(pageLength = 5, dom = 'tip', order = list(list(1, 'desc'))),
+    rownames = FALSE,
+    class = 'cell-border stripe hover'
+  )
+}
 ```
 
 # Clusters
